@@ -1,4 +1,3 @@
-Javascript id="fix-clean-index"
 const express = require("express");
 const bodyParser = require("body-parser");
 
@@ -10,7 +9,7 @@ app.get("/", (req, res) => {
   res.send("Pay4Pump WhatsApp Bot is Live 🚀");
 });
 
-// Webhook route (for future WhatsApp integration)
+// Webhook route
 app.post("/webhook", (req, res) => {
   console.log("Incoming message:", req.body);
   res.sendStatus(200);
