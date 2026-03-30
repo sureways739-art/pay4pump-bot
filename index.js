@@ -10,7 +10,7 @@ app.get("/", (req, res) => {
   res.send("Pay4Pump WhatsApp Bot is Live 🚀");
 });
 
-// Webhook verification (VERY IMPORTANT)
+// Webhook verification
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -24,7 +24,7 @@ app.get("/webhook", (req, res) => {
   }
 });
 
-// Receive messages (next step)
+// Receive messages
 app.post("/webhook", (req, res) => {
   console.log("Incoming message:", JSON.stringify(req.body, null, 2));
   res.sendStatus(200);
