@@ -1,36 +1,40 @@
-const express = require("express");
-const app = express();
+app.post("/webhook", async (req, res) => {
+  const body = req.body;
 
-app.use(express.json());
+  if (body.object) {
+    const entry = body.entry?.[0];
+    const changes = entry?.changes?.[0];
+    const value = changes?.value;
+    const messages = value?.messages;
 
-const VERIFY_TOKEN = "pay4pump123";
+    if (messages) {
+      const from = messages[0].from;
 
-// Home route
-app.get("/", (req, res) => {
-  res.send("Pay4Pump WhatsApp Bot is Live 🚀");
-});
+      // Your reply message
+      const response = {
+        messaging_product: "whatsapp",
+        to: from,
+        text: {
+          body: "👋 Welcome to Pay4Pump!\n\n1. Buy Fuel\n2. Check Price\n3. Find Station"
+        }
+      };
 
-// Webhook verification
-app.get("/webhook", (req, res) => {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
+      // Send message back
+      await fetch(
+        `https://graph.facebook.com/v18.0/${value.metadata.phone_number_id}/messages`,
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${process.env.WHATSAPP_TOKEN}`
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(response)
+        }
+      );
+    }
 
-  if (mode && token === VERIFY_TOKEN) {
-    console.log("Webhook verified");
-    return res.status(200).send(challenge);
+    res.sendStatus(200);
   } else {
-    return res.sendStatus(403);
+    res.sendStatus(404);
   }
-});
-
-// Receive messages
-app.post("/webhook", (req, res) => {
-  console.log("Incoming message:", JSON.stringify(req.body, null, 2));
-  res.sendStatus(200);
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
 });
