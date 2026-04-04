@@ -1,171 +1,146 @@
 import express from "express";
 import fetch from "node-fetch";
+import mongoose from "mongoose";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+// MongoDB connection
+mongoose.connect(process.env.MONGO_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+})
+.then(() => console.log("✅ MongoDB connected"))
+.catch(err => console.error("❌ MongoDB connection error:", err));
+
+// Schemas
+const userSchema = new mongoose.Schema({
+  whatsappNumber: { type: String, required: true, unique: true },
+  driverLicense: { type: String, required: true },
+  vehiclePlate: { type: String, required: true },
+  wallet: { type: Number, default: 0 },
+  createdAt: { type: Date, default: Date.now }
+});
+
+const stationSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  licensed: { type: Boolean, default: false },
+  location: String
+});
+
+const User = mongoose.model("User", userSchema);
+const Station = mongoose.model("Station", stationSchema);
 
 const app = express();
 app.use(express.json());
 
-// 🔐 Environment variables
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
-const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 
-// 🧠 In-memory session (demo purpose)
-const userSessions = {};
-
-// 💰 Token reward logic
-function calculateReward(fuel, quantity) {
-  if (fuel === "CNG") {
-    return quantity * 5; // 🔥 Higher reward for clean energy
-  } else {
-    return quantity * 2; // Standard reward
-  }
-}
-
-// ===============================
-// ✅ Webhook Verification
-// ===============================
+// Webhook verification
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
-
   if (mode && token === VERIFY_TOKEN) {
-    console.log("✅ Webhook verified");
-    return res.status(200).send(challenge);
+    console.log("Webhook verified");
+    res.status(200).send(challenge);
   } else {
-    return res.sendStatus(403);
+    res.sendStatus(403);
   }
 });
 
-// ===============================
-// 📩 Handle Messages
-// ===============================
+// Incoming messages
 app.post("/webhook", async (req, res) => {
   try {
-    const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+    const body = req.body;
+    if (!body.object) return res.sendStatus(404);
 
-    if (message) {
-      const from = message.from;
-      const text = message.text?.body?.toLowerCase() || "";
+    const entry = body.entry?.[0];
+    const changes = entry?.changes?.[0];
+    const message = changes?.value?.messages?.[0];
+    if (!message) return res.sendStatus(200);
 
-      console.log("📩 Incoming:", text);
+    const from = message.from;
+    const msgBody = message.text?.body?.toLowerCase() || "";
 
-      if (!userSessions[from]) {
-        userSessions[from] = { step: "menu" };
+    // Check if user exists
+    let user = await User.findOne({ whatsappNumber: from });
+
+    // User registration
+    if (!user) {
+      const parts = msgBody.split(",");
+      if (parts.length < 2) {
+        await sendWhatsAppMessage(from, "Please send your Driver License and Vehicle Plate in this format: LICENSE,PLATE");
+        return res.sendStatus(200);
       }
 
-      let responseText = "";
+      const [driverLicense, vehiclePlate] = parts.map(p => p.trim());
 
-      switch (userSessions[from].step) {
+      user = new User({ whatsappNumber: from, driverLicense, vehiclePlate });
+      await user.save();
 
-        // 🏠 MAIN MENU
-        case "menu":
-          if (text === "1") {
-            userSessions[from].step = "fuel_type";
-            responseText = "⛽ Select fuel type:\n1. Petrol\n2. Diesel\n3. CNG (Clean Energy ♻️)";
-          } else if (text === "2") {
-            responseText =
-              "📊 Current Prices:\nPetrol: ₦650/L\nDiesel: ₦900/L\nCNG: ₦200/KG";
-          } else if (text === "3") {
-            responseText =
-              "📍 Nearest stations:\n- NNPC\n- Total Energies\n- Mobil\n- CNG Stations Available";
-          } else {
-            responseText =
-              "👋 Welcome to Pay4Pump!\n\n1. Buy Fuel\n2. Check Price\n3. Find Station";
-          }
-          break;
+      await sendWhatsAppMessage(from, "✅ Registration complete! Now you can buy fuel and earn tokens.\nPlease provide: FUEL_TYPE,STATION_NAME");
+      return res.sendStatus(200);
+    }
 
-        // ⛽ FUEL TYPE
-        case "fuel_type":
-          if (text === "1") {
-            userSessions[from].fuel = "Petrol";
-            userSessions[from].unit = "Litres";
-            userSessions[from].step = "quantity";
-            responseText = "How many litres of Petrol do you want?";
-          } else if (text === "2") {
-            userSessions[from].fuel = "Diesel";
-            userSessions[from].unit = "Litres";
-            userSessions[from].step = "quantity";
-            responseText = "How many litres of Diesel do you want?";
-          } else if (text === "3") {
-            userSessions[from].fuel = "CNG";
-            userSessions[from].unit = "KG";
-            userSessions[from].step = "quantity";
-            responseText =
-              "🌱 CNG selected (Clean Energy Bonus Activated!)\n\nHow many KG do you want?";
-          } else {
-            responseText = "Please choose:\n1. Petrol\n2. Diesel\n3. CNG";
-          }
-          break;
+    // Fuel purchase flow
+    const parts = msgBody.split(",");
+    if (parts.length < 2) {
+      await sendWhatsAppMessage(from, "Please provide both FUEL_TYPE and STATION_NAME, e.g., Diesel,Shell Ikeja");
+      return res.sendStatus(200);
+    }
 
-        // 🔢 QUANTITY
-        case "quantity":
-          const qty = parseFloat(text);
-          if (!isNaN(qty) && qty > 0) {
-            userSessions[from].quantity = qty;
-            userSessions[from].step = "confirm";
+    const [fuelType, stationName] = parts.map(p => p.trim());
+    const station = await Station.findOne({ name: new RegExp(stationName, "i"), licensed: true });
 
-            const reward = calculateReward(userSessions[from].fuel, qty);
+    if (!station) {
+      await sendWhatsAppMessage(from, `❌ Station "${stationName}" is not recognized or licensed. Please choose a valid licensed station.`);
+      return res.sendStatus(200);
+    }
 
-            responseText = `🧾 Confirm Order:\nFuel: ${userSessions[from].fuel}\nQuantity: ${qty} ${userSessions[from].unit}\n\n🎁 Reward: ${reward} Tokens\n\nReply YES to confirm or NO to cancel`;
-          } else {
-            responseText = "Please enter a valid quantity.";
-          }
-          break;
+    // Token rewards
+    let reward = 0;
+    if (fuelType === "diesel") reward = 10;
+    else if (fuelType === "petrol") reward = 10;
+    else if (fuelType === "cng") reward = 20;
 
-        // ✅ CONFIRM
-        case "confirm":
-          if (text === "yes") {
-            const { fuel, quantity } = userSessions[from];
-            const reward = calculateReward(fuel, quantity);
-
-            responseText =
-              `✅ Order Confirmed!\n\nFuel: ${fuel}\nQuantity: ${quantity}\n\n🎁 You earned ${reward} tokens!\n\n💳 Payment integration coming soon.`;
-
-            userSessions[from].step = "menu";
-          } else if (text === "no") {
-            responseText = "❌ Order cancelled.\nReturning to menu.";
-            userSessions[from].step = "menu";
-          } else {
-            responseText = "Please reply YES or NO.";
-          }
-          break;
-
-        default:
-          userSessions[from].step = "menu";
-          responseText =
-            "👋 Welcome to Pay4Pump!\n\n1. Buy Fuel\n2. Check Price\n3. Find Station";
-      }
-
-      // ===============================
-      // 📤 Send Reply
-      // ===============================
-      await fetch(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${ACCESS_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          to: from,
-          text: { body: responseText },
-        }),
-      });
+    if (reward > 0) {
+      user.wallet += reward;
+      await user.save();
+      await sendWhatsAppMessage(from, `💰 You've earned ${reward} tokens for purchasing ${fuelType.toUpperCase()} at ${station.name}.\nYour wallet balance: ${user.wallet} tokens.`);
+    } else {
+      await sendWhatsAppMessage(from, "Invalid fuel type. Please choose Diesel, Petrol, or CNG.");
     }
 
     res.sendStatus(200);
+
   } catch (error) {
-    console.error("❌ Error:", error);
+    console.error("Error:", error);
     res.sendStatus(500);
   }
 });
 
-// ===============================
-// 🚀 Server
-// ===============================
-const PORT = process.env.PORT || 10000;
+// WhatsApp API helper
+async function sendWhatsAppMessage(to, text) {
+  try {
+    await fetch(`https://graph.facebook.com/v18.0/me/messages`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${ACCESS_TOKEN}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to,
+        text: { body: text }
+      })
+    });
+  } catch (err) {
+    console.error("❌ WhatsApp send error:", err);
+  }
+}
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+// Start server
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
