@@ -1,7 +1,7 @@
 {
   "name": "pay4pump-bot",
-  "version": "1.0.0",
-  "description": "Pay4Pump WhatsApp Bot with CNG rewards and token incentive system",
+  "version": "1.1.0",
+  "description": "Pay4Pump WhatsApp Bot with CNG rewards, token incentives, wallet, and MongoDB support",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -16,7 +16,9 @@
     "cng",
     "clean-energy",
     "token-rewards",
-    "pay4pump"
+    "pay4pump",
+    "wallet",
+    "mongodb"
   ],
   "author": "Abdulazeez Yusuf",
   "license": "MIT",
@@ -25,6 +27,9 @@
   },
   "dependencies": {
     "express": "^4.18.2",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "mongoose": "^7.5.0",
+    "dotenv": "^16.3.1",
+    "uuid": "^9.0.0"
   }
 }
