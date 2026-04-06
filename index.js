@@ -124,7 +124,7 @@ app.post("/webhook", async (req, res) => {
 // WhatsApp API helper
 async function sendWhatsAppMessage(to, text) {
   try {
-    await fetch(`https://graph.facebook.com/v18.0/me/messages`, {
+    await fetch(`https://graph.facebook.com/v18.0/${process.env.PHONE_NUMBER_ID}/messages`, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${ACCESS_TOKEN}`,
