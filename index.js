@@ -37,16 +37,23 @@ app.use(express.json());
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
 
-// Webhook verification
+// Webhook verification (VERY IMPORTANT)
 app.get("/webhook", (req, res) => {
+  const VERIFY_TOKEN = "12345"; // keep simple for now
+
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
-  if (mode && token === VERIFY_TOKEN) {
-    console.log("Webhook verified");
-    res.status(200).send(challenge);
+
+  console.log("Mode:", mode);
+  console.log("Token:", token);
+
+  if (mode === "subscribe" && token === VERIFY_TOKEN) {
+    console.log("✅ Webhook verified!");
+    return res.status(200).send(challenge);
   } else {
-    res.sendStatus(403);
+    console.log("❌ Verification failed");
+    return res.sendStatus(403);
   }
 });
 
