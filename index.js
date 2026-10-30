@@ -54,6 +54,22 @@ app.get("/webhook", (req, res) => {
   console.warn("WhatsApp webhook verification rejected.");
   return res.sendStatus(403);
 });
-const PORT = process.env.PORT || 10000;
+// API home route
+app.get("/", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "Sureway Pay4Pump API is running",
+    service: "Pay4Pump"
+  });
+});
+
+// Health check route
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "API is healthy"
+  });
+});
+   const PORT = process.env.PORT || 10000;
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
