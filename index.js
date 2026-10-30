@@ -16,8 +16,32 @@ mongoose.connect(process.env.MONGO_URI, {
 const userSchema = new mongoose.Schema({
   whatsappNumber: { type: String, required: true, unique: true },
   driverLicense: { type: String, required: true },
-  vehiclePlate: { type: String, required: true },
-  wallet: { type: Number, default: 0 },
+vehiclePlate: { type: String, required: true },
+
+userType: {
+  type: String,
+  enum: [
+    "motorist",
+    "motorcyclist",
+    "truck_driver",
+    "fleet_operator",
+    "station_operator"
+  ],
+  default: "motorist"
+},
+
+ninVerification: {
+  status: {
+    type: String,
+    enum: ["not_submitted", "pending", "verified", "failed"],
+    default: "not_submitted"
+  },
+  providerReference: { type: String, default: null },
+  verifiedAt: { type: Date, default: null },
+  consentAt: { type: Date, default: null }
+},
+
+wallet: { type: Number, default: 0 },
   createdAt: { type: Date, default: Date.now }
 });
 
