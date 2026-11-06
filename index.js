@@ -246,6 +246,8 @@ app.post("/language/preference", async (req, res) => {
 app.post("/webhook", async (req, res) => {
   try {
     const body = req.body;
+console.log("========== WHATSAPP POST RECEIVED ==========");
+console.log("Webhook object:", body?.object);
 
     if (body.object === "whatsapp_business_account") {
       const entries = body.entry || [];
