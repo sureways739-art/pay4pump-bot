@@ -1,10 +1,12 @@
 import express from "express";
 import fetch from "node-fetch";
+import OpenAI from "openai";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 dotenv.config();
+const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 
 // Sureway WhatsApp Cloud API sender
 async function sendWhatsAppMessage(to, message) {
@@ -273,24 +275,47 @@ console.log("Webhook object:", body?.object);
 
             let reply;
 
-            switch (incomingText) {
-              case "1":
-                reply = "SMEs Connect AI – Market Access. We help businesses, buyers and suppliers connect. Please tell us whether you are a buyer or supplier.";
-                break;
-              case "2":
-                reply = "CargoConnectAI – Logistics. We connect cargo owners with transport operators. Are you a cargo owner or transporter?";
-                break;
-              case "3":
-                reply = "Smart Fuel Africa / Pay4Pump – Energy. We support digital fuel access and bookings. Are you a motorist, fleet operator or filling-station partner?";
-                break;
-              case "4":
-                reply = "SureWay Support. Please describe how our team can assist you.";
-                break;
-              default:
-                reply = "Welcome to SureWay Integrated Technology Solutions Ltd!\n\nPlease select a service:\n\n1. SMEs Connect AI – Market Access\n2. CargoConnectAI – Logistics\n3. Smart Fuel Africa / Pay4Pump – Energy\n4. Speak to SureWay Support\n\nReply with 1, 2, 3 or 4.";
-            }
+        try {
+          if (!openai) {
+            throw new Error("OpenAI API key is not configured");
+          }
 
-            await sendWhatsAppMessage(message.from, reply);
+          const aiResponse = await openai.responses.create({
+            model: process.env.OPENAI_MODEL || "gpt-5.5",
+            instructions: `You are the Sureway Pay4Pump WhatsApp AI assistant.
+
+You represent Sureway Integrated Technology Solutions Limited.
+
+Help users with:
+1. Pay4Pump and Smart Fuel Africa: digital fuel access, bookings and rewards.
+2. CargoConnectAI: cargo owners and transport operators.
+3. SureWay Market Access AI: buyers, suppliers and SMEs.
+4. SureWay customer support.
+
+Communicate naturally, politely and concisely.
+Use simple English and respond in the user's language where possible.
+
+Ask relevant follow-up questions to understand the user's needs.
+Never invent fuel prices, station availability, bookings, payments,
+wallet balances or token transactions.
+Never claim a transaction has been completed unless the system confirms it.
+Do not request passwords, API keys, PINs or sensitive payment credentials.
+For issues requiring human intervention, direct the user to SureWay Support.`,
+            input: incomingText,
+            max_output_tokens: 250
+          });
+
+          reply = (aiResponse.output_text || "").trim();
+
+          if (!reply) {
+            throw new Error("OpenAI returned an empty response");
+          }
+        } catch (error) {
+          console.error("OpenAI conversation error:", error);
+          reply = "Sorry, I'm having difficulty responding right now. Please try again shortly or contact SureWay Support.";
+        }
+
+        await sendWhatsAppMessage(message.from, reply);
           }
         }
       }
