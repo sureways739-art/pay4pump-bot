@@ -8,6 +8,62 @@ import dotenv from "dotenv";
 dotenv.config();
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 
+
+// WhatsApp voice-note transcription
+async function transcribeWhatsAppAudio(mediaId) {
+  const token = process.env.WHATSAPP_ACCESS_TOKEN;
+
+  if (!token || !openai) {
+    throw new Error("WhatsApp or OpenAI credentials are missing");
+  }
+
+  const mediaResponse = await fetch(
+    `https://graph.facebook.com/v25.0/${mediaId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    }
+  );
+
+  if (!mediaResponse.ok) {
+    throw new Error("Unable to retrieve WhatsApp audio");
+  }
+
+  const mediaData = await mediaResponse.json();
+
+  if (!mediaData.url) {
+    throw new Error("WhatsApp audio URL is missing");
+  }
+
+  const audioResponse = await fetch(mediaData.url, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+
+  if (!audioResponse.ok) {
+    throw new Error("Unable to download WhatsApp audio");
+  }
+
+  const audioBuffer = Buffer.from(
+    await audioResponse.arrayBuffer()
+  );
+
+  const audioFile = new File(
+    [audioBuffer],
+    "voice-note.ogg",
+    { type: mediaData.mime_type || "audio/ogg" }
+  );
+
+  const transcription = await openai.audio.transcriptions.create({
+    file: audioFile,
+    model: "gpt-transcribe"
+  });
+
+  return transcription.text.trim();
+}
+
 // Sureway WhatsApp Cloud API sender
 async function sendWhatsAppMessage(to, message) {
   const token = process.env.WHATSAPP_ACCESS_TOKEN;
@@ -262,11 +318,32 @@ console.log("Webhook object:", body?.object);
           const messages = value.messages || [];
 
           for (const message of messages) {
-            if (message.type !== "text") continue;
+            if (message.type !== "text" && message.type !== "audio") continue;
 
-            const incomingText = (message.text?.body || "")
-              .trim()
-              .toLowerCase();
+            let incomingText;
+
+            if (message.type === "audio") {
+                const audioId = message.audio?.id;
+
+                if (!audioId) continue;
+
+                try {
+                    incomingText = await transcribeWhatsAppAudio(audioId);
+                } catch (error) {
+                    console.error("WhatsApp audio transcription error:", error);
+                    await sendWhatsAppMessage(
+                        message.from,
+                        "Sorry, I couldn't understand that voice note. Please try again or send your message as text."
+                    );
+                    continue;
+                }
+            } else {
+                incomingText = message.text?.body || "";
+            }
+
+            incomingText = (incomingText || "").trim().toLowerCase();
+
+            if (!incomingText) continue;
 
             console.log("Incoming WhatsApp message:", {
               from: message.from,
