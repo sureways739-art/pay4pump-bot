@@ -101,6 +101,88 @@ async function sendWhatsAppMessage(to, message) {
   return result;
 }
 
+
+// Generate spoken replies using OpenAI
+async function generateWhatsAppVoice(text) {
+  if (!openai) {
+    throw new Error("OpenAI API client is not configured");
+  }
+
+  const speech = await openai.audio.speech.create({
+    model: process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts",
+    voice: process.env.OPENAI_TTS_VOICE || "marin",
+    input: String(text).slice(0, 4096),
+    response_format: "opus",
+    instructions: "Speak clearly and naturally, with a warm, helpful African customer-support tone."
+  });
+
+  return Buffer.from(await speech.arrayBuffer());
+}
+
+// Upload and send an outgoing WhatsApp voice note
+async function sendWhatsAppAudio(to, audioBuffer) {
+  const token = process.env.WHATSAPP_ACCESS_TOKEN;
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+  if (!token || !phoneNumberId) {
+    throw new Error("WhatsApp API credentials are missing");
+  }
+
+  const form = new FormData();
+  form.append("messaging_product", "whatsapp");
+  form.append(
+    "file",
+    new Blob([audioBuffer], { type: "audio/ogg; codecs=opus" }),
+    "voice-note.ogg"
+  );
+
+  const uploadResponse = await fetch(
+    `https://graph.facebook.com/v25.0/${phoneNumberId}/media`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form
+    }
+  );
+
+  const media = await uploadResponse.json();
+
+  if (!uploadResponse.ok || !media.id) {
+    console.error("WhatsApp audio upload error:", media);
+    throw new Error("WhatsApp audio upload failed");
+  }
+
+  const sendResponse = await fetch(
+    `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to,
+        type: "audio",
+        audio: {
+          id: media.id,
+          voice: true
+        }
+      })
+    }
+  );
+
+  const result = await sendResponse.json();
+
+  if (!sendResponse.ok) {
+    console.error("WhatsApp audio message error:", result);
+    throw new Error("WhatsApp voice message delivery failed");
+  }
+
+  return result;
+}
+
 // MongoDB connection
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -357,7 +439,14 @@ console.log("Webhook object:", body?.object);
             throw new Error("OpenAI API key is not configured");
           }
 
-          const aiResponse = await openai.responses.create({
+          const conversationProfile = await ConversationProfile.findOne({
+        whatsappNumber: message.from
+      }).lean();
+
+      const preferredLanguage = conversationProfile?.preferredLanguage || "en";
+            const responseMode = conversationProfile?.responseMode || "both";
+
+      const aiResponse = await openai.responses.create({
             model: process.env.OPENAI_MODEL || "gpt-5.5",
             instructions: `You are the Sureway Pay4Pump WhatsApp AI assistant.
 
@@ -371,6 +460,7 @@ Help users with:
 
 Communicate naturally, politely and concisely.
 Use simple English and respond in the user's language where possible.
+The user's saved language preference is "${preferredLanguage}". Respond in that language.
 
 Ask relevant follow-up questions to understand the user's needs.
 Never invent fuel prices, station availability, bookings, payments,
@@ -392,7 +482,25 @@ For issues requiring human intervention, direct the user to SureWay Support.`,
           reply = "Sorry, I'm having difficulty responding right now. Please try again shortly or contact SureWay Support.";
         }
 
-        await sendWhatsAppMessage(message.from, reply);
+        if (responseMode === "text") {
+                await sendWhatsAppMessage(message.from, reply);
+              } else if (responseMode === "voice") {
+                try {
+                  const audioBuffer = await generateWhatsAppVoice(reply);
+                  await sendWhatsAppAudio(message.from, audioBuffer);
+                } catch (voiceError) {
+                  console.error("Voice reply failed; sending text fallback:", voiceError);
+                  await sendWhatsAppMessage(message.from, reply);
+                }
+              } else {
+                await sendWhatsAppMessage(message.from, reply);
+                try {
+                  const audioBuffer = await generateWhatsAppVoice(reply);
+                  await sendWhatsAppAudio(message.from, audioBuffer);
+                } catch (voiceError) {
+                  console.error("Additional voice reply failed:", voiceError);
+                }
+              }
           }
         }
       }
